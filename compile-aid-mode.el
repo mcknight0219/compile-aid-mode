@@ -53,7 +53,6 @@ generate most reliable error messages")
   "Report and error and disable `compiler-aid`."
   (ignore-errors
     (message "Fatal error: %s" var)
-    (compile-aid-mode -1)
     var))
 
 
@@ -262,6 +261,7 @@ generate most reliable error messages")
 	(ca-parse-buf)
 	(if (boundp 'current-error-number)
 	    (setq current-error-number 0))
+	(ca-cycle-error)
 	(if (buffer-live-p (get-buffer ca-buffer))
 	    (ca-erase-buffer))))))
 

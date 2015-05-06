@@ -1,4 +1,10 @@
 
+
+(defgroup compile-aid-mode nil
+  "Displaying compiling results on source code buffer"
+  :prefix "ca-"
+  :group 'tools)
+
 ;;;; Internal variables
 
 (defvar compile-aid-mode nil
@@ -14,9 +20,6 @@
   "Compile without linking and disable optimization to 
 generate most reliable error messages")
 
-(defvar ca-origin-text-properties (make-hash-table)
-  "Hold the original text properties")
-
 (defvar ca-buffer "ca-output-buffer"
   "Buffer to hold compiling output")
 
@@ -29,6 +32,8 @@ generate most reliable error messages")
 (defvar ca-my-map
   (let ((map (make-sparse-keymap)))
     (define-key map [tab] 'ca-cycle-error)
+    (define-key map (kbd "M-TAB") 'ca-cycle-error-only)
+    (define-key map (kbd "M-s") 'ca-fetch-and-show-info)
     map))
 
 (defface ca-error-line-face
@@ -162,6 +167,10 @@ generate most reliable error messages")
   (delete-overlay ca-highlight-line-overlay))
 
 
+(defmacro _get (l k)
+  (list 'cdr (list 'assoc k l)))
+
+
 (defvar indexing-result nil)
 (defvar current-error-number nil)
 (defun ca-cycle-error ()
@@ -169,9 +178,9 @@ generate most reliable error messages")
   (let* ((n (length indexing-result))
 	 (current 0)
 	 (l 0) (c 0))
-    (if (= n 0)
-	(if (not current-error-number)
-	    (setq current-error-number 0))
+    (unless (= n 0)
+      (if (not current-error-number)
+	  (setq current-error-number 0))
       (setq current 
 	    (nth current-error-number indexing-result))
       (setq l (string-to-int (cdr (assoc 'line current))))
@@ -185,6 +194,73 @@ generate most reliable error messages")
 	       (cdr (assoc 'content current)))
       (setq current-error-number
 	    (mod (+ 1 current-error-number) n)))))
+
+
+(defun ca-cycle-error-only ()
+  (interactive)
+  (let ((n (length indexing-result))
+	(current nil)
+	(l 0) (c 0))
+    (unless (= n 0)
+      (if (not current-error-number)
+	  (setq current-error-number 0))
+      (setq current 
+	    (nth current-error-number indexing-result))
+      (while (and (< current-error-number n)
+		  (string= "warning" (_get current 'type)))
+	(setq current-error-number 
+	      (1+ current-error-number))
+	(setq current
+	      (nth current-error-number indexing-result)))
+      (if (= n current-error-number)
+	  (setq current-error-number 0)
+	(progn
+	  (setq l (string-to-int (_get current 'line)))
+	  (setq c (string-to-int (_get current 'column)))
+	  (ca-highlight-line l "error")
+	  (goto-line l)
+	  (goto-char (1- (+ c (line-beginning-position))))
+	  (message "[error] %s"
+		   (_get current 'content))
+	  (setq current-error-number
+		(mod (1+ current-error-number) n)))))))
+
+;; Show message if there is on on current line.
+;; Also move cursor to its column 
+(defun ca-fetch-and-show-info ()
+  (interactive)
+  (let ((i 0)
+	(l (line-number-at-pos))
+	(c (- (point) (line-beginning-position)))
+	(len (length indexing-result))
+	(candidates nil))
+    (while (< i len)
+      (setq current 
+	    (nth i indexing-result))
+      (if (= l (string-to-int (_get current 'line)))
+	     (setq candidates (cons i candidates)))
+      (setq i (1+ i)))
+    ;; pick the neareast error/warning if there're more 
+    ;; than one result
+    (setq min most-positive-fixnum)
+    (unless (not candidates)
+      (dolist (var candidates n)
+	(setq current 
+	      (nth var indexing-result))
+	(setq gap
+	      (abs (- (string-to-int (_get current 'column)) c))) 
+	(if (< gap min)
+	    (progn
+	      (setq min gap)
+	      (setq n var))))
+      (setq current 
+	    (nth n indexing-result))
+      (goto-char (+ (line-beginning-position)
+		    (string-to-int
+		     (_get current 'column))))
+      (message "[%s] %s"
+	       (_get current 'type)
+	       (_get current 'content)))))
 
 
 ;; parse the compiling result and organize the data

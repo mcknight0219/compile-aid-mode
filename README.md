@@ -14,7 +14,9 @@ Optionally, you can trigger this mode automatically
 		(compile-aid-mode)))
 ```
 
-Inside this mode, you can cycle through errors/warnings by pressing [Tab].
+Inside this mode, you can cycle through errors/warnings by pressing `[Tab]`.
+You can also just cycle through errors using `[M-TAB]`. If you are on the
+right line, you can re-show the message using `[M-s]`.
 
 All highlights are disabled when disabling the mode
 

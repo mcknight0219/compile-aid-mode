@@ -1,4 +1,13 @@
 
+;; TODO
+;; [2015-05-28] Multiple compile-aid-mode instances will mess up
+;; global variables. Need setting up a table to map
+;; the file to its own set of varialbes
+;;
+;; [2015-05-28] Usually include settings are made in Makefile or other
+;; configuration files. Make educated guesses if reasonable
+
+(require 'cl-lib)
 
 (defgroup compile-aid-mode nil
   "Displaying compiling results on source code buffer"
@@ -62,7 +71,7 @@ generate most reliable error messages")
 
 
 (defun ca-check-valid-char (x)
-  (eq (string-match "[_A-Za-z0-9\\.]" x) 0)) 
+  (eq (string-match "[_A-Za-z0-9\\.\\-]" x) 0)) 
 
 (defun ca-clean-file-name (x)
   (if (eq (length x) 0)
@@ -110,6 +119,75 @@ generate most reliable error messages")
     (buffer-name))))
 
 
+(defvar ca-backtrack-level 3
+  "Maximum level of directories we are willing to step back")
+
+(defvar ca-include-dirs nil
+  "Additional includes ")
+
+;; try being smart to figure out location of
+;; include directories
+(defun ca-guess-include (filename)
+  (unless (file-name-directory filename)
+    (setq filename (expand-file-name filename)))
+  (let ((n ca-backtrack-level)
+	(break nil)
+	(dir (file-name-directory filename))
+	(tmp nil))
+    (while (and (> n 0) (not break))
+      (setq tmp (ca-include-dir-exist dir))
+      (if (> (length tmp) 0)
+	  (setq break t)
+	(progn
+	  (setq dir (file-name-directory (directory-file-name dir)))
+	  (setq n (1- n)))))
+    (if break
+	(concat "-I" dir "/" tmp)
+      "")))
+
+(defvar ca-include-list--filename "ca-include-dirs"
+  "User-provided list of include file locations")
+
+(defun ca-read-include ()
+  (if (file-exists-p ca-include-list--filename)
+      (with-temp-buffer
+	(let ((beg nil) 
+	      (result nil))
+	  (insert-file-contents ca-include-list--filename)
+	  (goto-char (point-min))
+	  (setq beg (point))
+	  (while (search-forward ";" (point-max) t 1)
+	    (setq result 
+		  (concat result (buffer-substring-no-properties beg (point))))
+	    (setq beg (1+ (point))))
+	  (setq result
+		(cons (buffer-substring-no-properties beg (point-max))
+		      result))
+	  result))
+    nil))
+
+(defun ca-get-include-switch (file)
+  (let ((r (ca-read-include)))
+    (if (> (length r) 0)
+	(progn
+	  (cl-reduce
+	   '(lambda (a b)
+	      (concat a " " b))
+	   (mapcar #'(lambda (ele)
+		      (concat "-I" ele))
+		   r) 
+	   :initial-value ""))
+      (ca-guess-include file))))
+
+(defun ca-include-dir-exist (top)
+  (let ((res ""))
+    (dolist (n (directory-files top))
+	    (if (or (string= n "include")
+		    (string= n "includes")
+		    (string= n "src"))
+		(setq res n)))
+    res))
+
 (defun ca-check-file-extension (path)
   (let ((ext (file-name-extension path)))
     (cond
@@ -140,7 +218,7 @@ generate most reliable error messages")
 ;; and such.
 (defun ca-compile-file (file)
   (let* ((compiler (ca-choose-compiler file))
-	 (cmd (ca-concat compiler ca-cflag file))
+	 (cmd (ca-concat compiler ca-cflag (ca-get-include-switch file) file))
 	 (buf (get-buffer-create ca-buffer))
 	 (ret 0))
     (ca-erase-buffer)
@@ -164,7 +242,8 @@ generate most reliable error messages")
 ;; stop ca mode and clean resources such as overlay
 (defun ca-quit ()
   (setq indexing-result nil)
-  (delete-overlay ca-highlight-line-overlay))
+  (delete-overlay ca-highlight-line-overlay)
+  (kill-buffer ca-buffer))
 
 
 (defmacro _get (l k)
@@ -308,7 +387,7 @@ generate most reliable error messages")
 (defun ca-index-result (buffer)
   (let* ((result nil)
 	 (old-buf (current-buffer))
-	 (header-re "\\([^:]+\\):\\([0-9]+\\):\\([0-9]+\\): \\(error\\|warning\\): \\(.+\\)$"))
+	 (header-re "\\([^:]+\\):\\([0-9]+\\):\\([0-9]+\\): \\(fatal error\\|error\\|warning\\): \\(.+\\)$"))
     ;; we are only concerned with line with line and column number
     (set-buffer buffer)
     (goto-char (point-min))
@@ -325,8 +404,6 @@ generate most reliable error messages")
     (set-buffer old-buf)
     result))
   
-
-
 ;; The starting point 
 (defun ca-compile ()
   (let ((filename (ca-get-file-name)))
@@ -339,7 +416,8 @@ generate most reliable error messages")
 	    (setq current-error-number 0))
 	(ca-cycle-error)
 	(if (buffer-live-p (get-buffer ca-buffer))
-	    (ca-erase-buffer))))))
+	    (ca-erase-buffer)
+	  )))))
 
 (defun ca-handle-after-change ()
   (if (boundp 'ca-highlight-col-overlay)
@@ -361,7 +439,7 @@ generate most reliable error messages")
      (ca-quit)))
     
 
-(provide 'compile-aid-mode)
+;;(provide 'compile-aid-mode)
 
 ;;; compile-aid-mode.el ends here
 
